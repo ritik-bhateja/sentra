@@ -1,0 +1,88 @@
+{
+  "response_type_1_bar_chart": {
+    "type": "bar",
+    "data": [
+      {"label": "India", "value": "25"},
+      {"label": "America", "value": "29"},
+      {"label": "Africa", "value": "21"},
+      {"label": "Europe", "value": "18"}
+    ],
+    "explanation": "Regional distribution shows America leading with 29 units, followed by India with 25 units. Africa and Europe show moderate performance.",
+    "query_executed": "SELECT region, COUNT(*) as count FROM customers GROUP BY region"
+  },
+
+  "response_type_1_line_chart": {
+    "type": "line",
+    "data": [
+      {"label": "Jan", "value": "12"},
+      {"label": "Feb", "value": "19"},
+      {"label": "Mar", "value": "15"},
+      {"label": "Apr", "value": "25"},
+      {"label": "May", "value": "22"},
+      {"label": "Jun", "value": "30"}
+    ],
+    "explanation": "Growth trend analysis reveals consistent upward momentum with a 150% increase from January to June. Strong performance in Q2.",
+    "query_executed": "SELECT MONTH(date) as month, SUM(revenue) as value FROM sales WHERE YEAR(date) = 2024 GROUP BY MONTH(date)"
+  },
+
+  "response_type_1_pie_chart": {
+    "type": "pie",
+    "data": [
+      {"label": "Savings", "value": "45"},
+      {"label": "Checking", "value": "30"},
+      {"label": "Investment", "value": "20"},
+      {"label": "Other", "value": "5"}
+    ],
+    "explanation": "Account type distribution shows Savings accounts dominating at 45%, followed by Checking at 30%. Investment accounts represent a growing segment at 20%.",
+    "query_executed": "SELECT account_type, COUNT(*) * 100.0 / (SELECT COUNT(*) FROM accounts) as percentage FROM accounts GROUP BY account_type"
+  },
+
+  "response_type_2_simple_text": {
+    "type": "text",
+    "data": "123",
+    "explanation": "The total number of active accounts is 123. This represents a 12% increase from last quarter, indicating healthy growth in our customer base.",
+    "query_executed": "SELECT COUNT(*) FROM accounts WHERE status = 'active'"
+  },
+
+  "response_type_2_text_with_details": {
+    "type": "text",
+    "data": "Total: $1,234,567.89",
+    "explanation": "The total balance across all accounts is $1,234,567.89. This includes all account types: savings, checking, and investment accounts. The average account balance is $9,876.54.",
+    "query_executed": "SELECT SUM(balance) as total_balance FROM accounts"
+  },
+
+  "response_type_3_customer_data": {
+    "type": "text",
+    "data": {
+      "name": "John Anderson",
+      "cif_no": "CIF100000",
+      "age": "23",
+      "state": "California",
+      "email": "john.anderson@email.com",
+      "phone": "+1 555-123-4567",
+      "accountNumber": "ACC-2024-789456",
+      "accountType": "Premium Savings",
+      "balance": "125750.50",
+      "joinDate": "2020-01-15",
+      "status": "Active",
+      "creditScore": "785",
+      "lastTransaction": "2024-01-15",
+      "address": "123 Main Street, San Francisco, CA 94102"
+    },
+    "explanation": "Customer profile retrieved successfully. John Anderson is an active member with Premium Savings account and excellent credit standing.",
+    "query_executed": "SELECT * FROM customers WHERE cif_no = 'CIF100000'"
+  },
+
+  "response_type_3_customer_minimal": {
+    "type": "text",
+    "data": {
+      "name": "Sarah Johnson",
+      "cif_no": "CIF100002",
+      "age": "34",
+      "state": "New York",
+      "status": "Active"
+    },
+    "explanation": "Basic customer information for Sarah Johnson. She is an active customer based in New York.",
+    "query_executed": "SELECT name, cif_no, age, state, status FROM customers WHERE cif_no = 'CIF100002'"
+  }
+}

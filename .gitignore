@@ -1,0 +1,6 @@
+Backend/aws_env/*
+Frontend/node_modules/
+Backend/layer/*
+layer/*
+Backend/lambda_package/*
+aws_env/*

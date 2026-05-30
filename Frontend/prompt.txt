@@ -1,0 +1,99 @@
+Sentra – Insurance Chatbot UI Requirements
+
+Build a insurance-focused AI chatbot UI named Sentra.
+The entire app should use dark mode with a clean, professional, modern look.
+
+There is no backend work required. Assume an API already exists.
+
+Login Page
+
+Create a login screen in dark mode.
+
+Any username and password should work for now (no validation needed).
+
+After login, take the user to the main chatbot screen.
+
+Chat Interface Requirements
+
+The chatbot should prompt users to type natural-language queries (e.g., “sales by region last quarter”).
+
+On submit, send the text to the backend API using this payload:
+
+{"user_query": "<user text>"}
+
+
+The backend will always respond with JSON containing:
+
+type → bar / line / pie / scatter / text
+
+data → either a list of dictionaries OR a simple text string
+
+explanation → text explaining the returned data
+
+Response Handling
+
+(1) If data is a list of dictionaries:
+
+Example:
+
+{
+  "type": "bar",
+  "data": [
+    {"label": "India", "value": "25"},
+    {"label": "America", "value": "29"},
+    {"label": "Africa", "value": "21"}
+  ],
+  "explanation": "sample_text"
+}
+
+
+Front-end behavior:
+
+Render the correct chart based on “type”.
+
+Use one charting library only (pick from Recharts, Chart.js, or ECharts).
+
+Show chart plus the explanation text.
+
+Add a toggle that switches between:
+
+Chart view
+
+Table view (showing the label/value rows)
+
+Provide a short trend summary or suggestions along with the explanation.
+
+(2) If data is simple text:
+
+Example:
+
+{
+  "type": "text",
+  "data": "123",
+  "explanation": "sample_text"
+}
+
+
+Front-end behavior:
+
+Do NOT show a chart.
+
+Only display the explanation in the chat.
+
+State & Session
+
+Store each chat session in localStorage so the conversation is preserved after reload.
+
+Load the saved chat history when the user revisits the app.
+
+Extra Improvements (Optional but Recommended)
+
+Add typing animation for chatbot replies.
+
+Show loading indicators while waiting for API response.
+
+Allow message resend on error.
+
+Add a left sidebar to show past sessions or saved queries.
+
+Make the UI responsive for desktop + mobile.
