@@ -2,7 +2,7 @@ import re
 import logging
 from strands import Agent
 from strands.models import BedrockModel
-from tools.athena_query import athena_query
+from tools.athena_query import athena_query, set_current_user_email
 from memory.memory_setup import client, memory_id
 from memory.memory_hook import MemoryHookProvider
 from agent.prompt import base_prompt, get_dynamic_schema_prompt
@@ -11,9 +11,14 @@ import json
 logger = logging.getLogger(__name__)
 
 class SQLQueryExecutor:
-    def __init__(self, actor_id='actor_123', session_id='session_123', region='ap-south-1', model_id='moonshotai.kimi-k2.5'):
+    def __init__(self, actor_id='actor_123', session_id='session_123', user_email=None, region='ap-south-1', model_id='moonshotai.kimi-k2.5'):
         logger.info("🚀 Initializing SQLQueryExecutor...")
         logger.info(f"📍 Region: {region}, Model ID: {model_id}")
+        logger.info(f"👤 User Email: {user_email}")
+        
+        # Set the user email globally for the athena_query tool to access
+        set_current_user_email(user_email)
+        logger.info(f"✅ User email set in global context for security filtering")
 
         try:
             self.model = BedrockModel(
@@ -37,7 +42,11 @@ class SQLQueryExecutor:
                 {dynamic_schema_prompt}
             """
             
-            agent_state = {"actor_id": actor_id, "session_id": session_id}
+            agent_state = {
+                "actor_id": actor_id, 
+                "session_id": session_id,
+                "user_email": user_email
+            }
             logger.info(f"🔑 Agent state: {agent_state}")
             logger.info("📋 Using dynamic schema prompt from memory")
             
@@ -48,7 +57,8 @@ class SQLQueryExecutor:
                 hooks=[MemoryHookProvider(client, memory_id)],
                 state=agent_state
             )
-            logger.info("✅ Agent created successfully with memory hooks and state.")
+            
+            logger.info("✅ Agent created successfully with athena_query tool, memory hooks and state.")
         except Exception as e:
             logger.error("❌ Failed to initialize Agent.", exc_info=True)
             raise e

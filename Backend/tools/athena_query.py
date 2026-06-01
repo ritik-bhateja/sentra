@@ -2,6 +2,20 @@ import boto3
 import time
 from typing import Any, Dict, List, Union
 from strands import tool
+from tools.query_security import QuerySecurityFilter
+
+# Global variable to store current user email (set by SQLQueryExecutor)
+_current_user_email = None
+
+def set_current_user_email(email: str):
+    """Set the current user email for security filtering"""
+    global _current_user_email
+    _current_user_email = email
+
+def get_current_user_email() -> str:
+    """Get the current user email for security filtering"""
+    global _current_user_email
+    return _current_user_email
 
 @tool(
     name="athena_query",
@@ -38,9 +52,27 @@ def athena_query(sql: str, database: str = "insurance_db") -> Union[str, List[Di
     import logging
     logger = logging.getLogger(__name__)
     
+    # Get user_email from global context
+    user_email = get_current_user_email()
+    
     logger.info(f"🔍 INSURANCE ATHENA QUERY TOOL CALLED")
     logger.info(f"   Database: {database} (insurance_db)")
-    logger.info(f"   SQL: {sql}")
+    logger.info(f"   User Email: {user_email}")
+    logger.info(f"   Original SQL: {sql}")
+    
+    # Apply security filter
+    if user_email:
+        if not QuerySecurityFilter.validate_user_email(user_email):
+            error_msg = f"Invalid user email format: {user_email}"
+            logger.error(f"   ❌ {error_msg}")
+            return error_msg
+        
+        sql, was_modified = QuerySecurityFilter.inject_security_filter(sql, user_email, database)
+        if was_modified:
+            logger.info(f"   🔒 Security filter applied")
+            logger.info(f"   Modified SQL: {sql}")
+    else:
+        logger.warning(f"   ⚠️ No user_email provided - query will run without security filter")
     
     # Ensure only insurance_db is used
     if database != "insurance_db":

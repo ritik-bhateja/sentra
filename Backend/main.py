@@ -33,6 +33,25 @@ def main(payload, context = None):
             "query_executed": ""
         }
     
+    # Extract user_email for security filtering
+    user_email = payload.get("user_email")
+    
+    # Normalize user_email to proper email format
+    if user_email and '@' not in user_email:
+        # user_email provided but not in email format (e.g., "harsh.kumar")
+        user_email = f"{user_email}@sentra.com"
+        logger.info(f"👤 User email normalized: {user_email}")
+    elif not user_email:
+        # No user_email provided, construct from user_id
+        if '@' in user_id:
+            user_email = user_id
+        else:
+            user_email = f"{user_id}@sentra.com"
+        logger.info(f"👤 User email constructed from user_id: {user_email}")
+    else:
+        # user_email is already in proper format
+        logger.info(f"👤 User email from payload: {user_email}")
+    
     # Extract and validate session_id
     session_id = payload.get("session_id")
     if not session_id:
@@ -51,8 +70,8 @@ def main(payload, context = None):
     
     logger.info(f"✅ Validated identifiers - user_id: {user_id}, actor_id: {actor_id}, session_id: {session_id}")
     
-    # Initialize SQLQueryExecutor with dynamic identifiers
-    generator = SQLQueryExecutor(actor_id=actor_id, session_id=session_id)
+    # Initialize SQLQueryExecutor with dynamic identifiers and user_email
+    generator = SQLQueryExecutor(actor_id=actor_id, session_id=session_id, user_email=user_email)
     try:
         
         result = generator.execute_sql(payload.get("user_query", ""), user_id)

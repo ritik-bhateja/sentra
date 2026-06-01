@@ -22,6 +22,7 @@ class QueryRequest(BaseModel):
     user_query: str
     user_id: str
     session_id: str
+    user_email: str = None  # Optional, defaults to user_id if not provided
 
 # --------------------------------------------
 #  QUERY ENDPOINT — BEDROCK AGENTCORE
@@ -58,10 +59,14 @@ async def send_to_bknd(request: QueryRequest):
     
     client = boto3.client('bedrock-agentcore', region_name='ap-south-1', config=config)
     
+    # Use user_email if provided, otherwise fallback to user_id
+    user_email = request.user_email if request.user_email else request.user_id
+    
     bknd_payload = json.dumps({
         "user_query": request.user_query,
         "user_id": request.user_id,
-        "session_id": request.session_id
+        "session_id": request.session_id,
+        "user_email": user_email
     })
 
     try:
