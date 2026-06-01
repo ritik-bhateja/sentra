@@ -3,6 +3,7 @@ import Sidebar from './Sidebar'
 import ChatMessage from './ChatMessage'
 import UserProfile from './UserProfile'
 import './ChatInterface.css'
+import * as chatApi from '../services/chatApi'
 
 function ChatInterface({ onLogout }) {
   const [messages, setMessages] = useState([])
@@ -12,13 +13,14 @@ function ChatInterface({ onLogout }) {
   const [currentSessionId, setCurrentSessionId] = useState(null)
   const [showProfile, setShowProfile] = useState(false)
   const [sidebarOpen, setSidebarOpen] = useState(true)
+  const [migrating, setMigrating] = useState(false)
   const messagesEndRef = useRef(null)
   const abortControllerRef = useRef(null)
 
   const userId = localStorage.getItem('sentra_user_id') || 'default'
 
   useEffect(() => {
-    loadSessions()
+    initializeSessions()
   }, [])
 
   useEffect(() => {
@@ -35,7 +37,47 @@ function ChatInterface({ onLogout }) {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' })
   }
 
-  const loadSessions = () => {
+  const initializeSessions = async () => {
+    try {
+      // Check if localStorage has sessions to migrate
+      const sessionKey = `sentra_sessions_${userId}`
+      const localSessions = JSON.parse(localStorage.getItem(sessionKey) || '[]')
+      
+      if (localSessions.length > 0) {
+        setMigrating(true)
+        console.log('Migrating localStorage sessions to RDS...')
+        await chatApi.migrateLocalStorageToRDS(userId)
+        setMigrating(false)
+      }
+      
+      // Load sessions from RDS
+      await loadSessions()
+    } catch (error) {
+      console.error('Error initializing sessions:', error)
+      setMigrating(false)
+      // If RDS fails, try to load from localStorage as fallback
+      loadSessionsFromLocalStorage()
+    }
+  }
+
+  const loadSessions = async () => {
+    try {
+      const sessionsData = await chatApi.getUserSessions(userId)
+      setSessions(sessionsData)
+      
+      if (sessionsData.length > 0) {
+        setCurrentSessionId(sessionsData[0].id)
+      } else {
+        await createNewSession()
+      }
+    } catch (error) {
+      console.error('Error loading sessions:', error)
+      // Fallback to localStorage
+      loadSessionsFromLocalStorage()
+    }
+  }
+
+  const loadSessionsFromLocalStorage = () => {
     const sessionKey = `sentra_sessions_${userId}`
     const savedSessions = JSON.parse(localStorage.getItem(sessionKey) || '[]')
     setSessions(savedSessions)
@@ -46,70 +88,107 @@ function ChatInterface({ onLogout }) {
     }
   }
 
-  const loadSession = (sessionId) => {
-    const session = sessions.find(s => s.id === sessionId)
-    if (session) {
-      setMessages(session.messages || [])
-    }
-  }
-
-  const saveSession = (sessionId, updatedMessages) => {
-    const sessionKey = `sentra_sessions_${userId}`
-    const updatedSessions = sessions.map(s => 
-      s.id === sessionId ? { ...s, messages: updatedMessages, updatedAt: Date.now() } : s
-    )
-    setSessions(updatedSessions)
-    localStorage.setItem(sessionKey, JSON.stringify(updatedSessions))
-  }
-
-  const createNewSession = () => {
-    const sessionKey = `sentra_sessions_${userId}`
-    
-    // Generate session ID with exactly 33 characters (AWS Bedrock requirement)
-    // Format: timestamp (13 chars) + underscore (1 char) + random alphanumeric (19 chars) = 33 chars
-    const timestamp = Date.now().toString() // 13 characters
-    const randomChars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789'
-    let randomSuffix = ''
-    for (let i = 0; i < 19; i++) {
-      randomSuffix += randomChars.charAt(Math.floor(Math.random() * randomChars.length))
-    }
-    const sessionId = `${timestamp}_${randomSuffix}` // Total: 33 characters
-    
-    const newSession = {
-      id: sessionId,
-      title: 'New Chat',
-      messages: [],
-      createdAt: Date.now(),
-      updatedAt: Date.now()
-    }
-    const updatedSessions = [newSession, ...sessions]
-    setSessions(updatedSessions)
-    setCurrentSessionId(newSession.id)
-    setMessages([])
-    localStorage.setItem(sessionKey, JSON.stringify(updatedSessions))
-  }
-
-  const renameSession = (sessionId, newTitle) => {
-    const sessionKey = `sentra_sessions_${userId}`
-    const updatedSessions = sessions.map(s =>
-      s.id === sessionId ? { ...s, title: newTitle } : s
-    )
-    setSessions(updatedSessions)
-    localStorage.setItem(sessionKey, JSON.stringify(updatedSessions))
-  }
-
-  const deleteSession = (sessionId) => {
-    const sessionKey = `sentra_sessions_${userId}`
-    const updatedSessions = sessions.filter(s => s.id !== sessionId)
-    setSessions(updatedSessions)
-    localStorage.setItem(sessionKey, JSON.stringify(updatedSessions))
-    
-    if (currentSessionId === sessionId) {
-      if (updatedSessions.length > 0) {
-        setCurrentSessionId(updatedSessions[0].id)
-      } else {
-        createNewSession()
+  const loadSession = async (sessionId) => {
+    try {
+      const messagesData = await chatApi.getSessionMessages(sessionId)
+      setMessages(messagesData)
+    } catch (error) {
+      console.error('Error loading session messages:', error)
+      // Fallback to local session data
+      const session = sessions.find(s => s.id === sessionId)
+      if (session && session.messages) {
+        setMessages(session.messages)
       }
+    }
+  }
+
+  const saveSession = async (sessionId, updatedMessages) => {
+    try {
+      // Update local state
+      const updatedSessions = sessions.map(s => 
+        s.id === sessionId ? { ...s, messages: updatedMessages, updatedAt: Date.now() } : s
+      )
+      setSessions(updatedSessions)
+      
+      // Note: Messages are already saved individually in handleSubmit
+      // This function is kept for compatibility but doesn't need to save to RDS
+    } catch (error) {
+      console.error('Error updating session:', error)
+    }
+  }
+
+  const createNewSession = async () => {
+    try {
+      // Generate session ID with exactly 33 characters (AWS Bedrock requirement)
+      const timestamp = Date.now().toString() // 13 characters
+      const randomChars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789'
+      let randomSuffix = ''
+      for (let i = 0; i < 19; i++) {
+        randomSuffix += randomChars.charAt(Math.floor(Math.random() * randomChars.length))
+      }
+      const sessionId = `${timestamp}_${randomSuffix}` // Total: 33 characters
+      
+      // Create session in RDS
+      const newSession = await chatApi.createSession(sessionId, userId, 'New Chat')
+      
+      const updatedSessions = [newSession, ...sessions]
+      setSessions(updatedSessions)
+      setCurrentSessionId(newSession.id)
+      setMessages([])
+    } catch (error) {
+      console.error('Error creating session:', error)
+      // Fallback to localStorage
+      const timestamp = Date.now().toString()
+      const randomChars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789'
+      let randomSuffix = ''
+      for (let i = 0; i < 19; i++) {
+        randomSuffix += randomChars.charAt(Math.floor(Math.random() * randomChars.length))
+      }
+      const sessionId = `${timestamp}_${randomSuffix}`
+      
+      const newSession = {
+        id: sessionId,
+        title: 'New Chat',
+        messages: [],
+        createdAt: Date.now(),
+        updatedAt: Date.now()
+      }
+      const updatedSessions = [newSession, ...sessions]
+      setSessions(updatedSessions)
+      setCurrentSessionId(newSession.id)
+      setMessages([])
+    }
+  }
+
+  const renameSession = async (sessionId, newTitle) => {
+    try {
+      await chatApi.updateSessionTitle(sessionId, newTitle)
+      
+      const updatedSessions = sessions.map(s =>
+        s.id === sessionId ? { ...s, title: newTitle } : s
+      )
+      setSessions(updatedSessions)
+    } catch (error) {
+      console.error('Error renaming session:', error)
+    }
+  }
+
+  const deleteSession = async (sessionId) => {
+    try {
+      await chatApi.deleteSession(sessionId)
+      
+      const updatedSessions = sessions.filter(s => s.id !== sessionId)
+      setSessions(updatedSessions)
+      
+      if (currentSessionId === sessionId) {
+        if (updatedSessions.length > 0) {
+          setCurrentSessionId(updatedSessions[0].id)
+        } else {
+          await createNewSession()
+        }
+      }
+    } catch (error) {
+      console.error('Error deleting session:', error)
     }
   }
 
@@ -137,39 +216,44 @@ function ChatInterface({ onLogout }) {
     setInput('')
     setLoading(true)
 
+    // Save user message to RDS
+    try {
+      await chatApi.saveMessage(
+        userMessage.id,
+        currentSessionId,
+        userMessage.type,
+        userMessage.content,
+        userMessage.timestamp
+      )
+    } catch (error) {
+      console.error('Error saving user message:', error)
+    }
+
     // Create new AbortController for this request
     abortControllerRef.current = new AbortController()
 
     // Update session title if it's the first message
     if (messages.length === 0) {
-      const sessionKey = `sentra_sessions_${userId}`
-      const updatedSessions = sessions.map(s => 
-        s.id === currentSessionId ? { ...s, title: input.trim().slice(0, 30) + '...' } : s
-      )
-      setSessions(updatedSessions)
-      localStorage.setItem(sessionKey, JSON.stringify(updatedSessions))
+      const newTitle = input.trim().slice(0, 30) + '...'
+      try {
+        await chatApi.updateSessionTitle(currentSessionId, newTitle)
+        const updatedSessions = sessions.map(s => 
+          s.id === currentSessionId ? { ...s, title: newTitle } : s
+        )
+        setSessions(updatedSessions)
+      } catch (error) {
+        console.error('Error updating session title:', error)
+      }
     }
 
     try {
-      // Call the actual API endpoint
-      const apiEndpoint = `${import.meta.env.VITE_API_URL}/query`
-      const response = await fetch(apiEndpoint, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ 
-          user_query: input.trim(),
-          user_id: userId,
-          session_id: currentSessionId
-        }),
-        signal: abortControllerRef.current.signal
-      })
-      
-
-      if (!response.ok) {
-        throw new Error(`API error: ${response.status}`)
-      }
-
-      const data = await response.json()
+      // Call the actual API endpoint using chatApi service
+      const data = await chatApi.sendQuery(
+        input.trim(),
+        userId,
+        currentSessionId,
+        abortControllerRef.current.signal
+      )
 
       const botMessage = {
         id: (Date.now() + 1).toString(),
@@ -180,6 +264,20 @@ function ChatInterface({ onLogout }) {
 
       const finalMessages = [...updatedMessages, botMessage]
       setMessages(finalMessages)
+      
+      // Save bot message to RDS
+      try {
+        await chatApi.saveMessage(
+          botMessage.id,
+          currentSessionId,
+          botMessage.type,
+          botMessage.content,
+          botMessage.timestamp
+        )
+      } catch (error) {
+        console.error('Error saving bot message:', error)
+      }
+      
       saveSession(currentSessionId, finalMessages)
     } catch (error) {
       // Check if the request was aborted
@@ -204,6 +302,20 @@ function ChatInterface({ onLogout }) {
 
       const finalMessages = [...updatedMessages, botMessage]
       setMessages(finalMessages)
+      
+      // Try to save mock response
+      try {
+        await chatApi.saveMessage(
+          botMessage.id,
+          currentSessionId,
+          botMessage.type,
+          botMessage.content,
+          botMessage.timestamp
+        )
+      } catch (saveError) {
+        console.error('Error saving mock message:', saveError)
+      }
+      
       saveSession(currentSessionId, finalMessages)
     } finally {
       setLoading(false)
@@ -276,6 +388,21 @@ function ChatInterface({ onLogout }) {
 
   return (
     <div className="chat-interface">
+      {migrating && (
+        <div style={{
+          position: 'fixed',
+          top: '50%',
+          left: '50%',
+          transform: 'translate(-50%, -50%)',
+          background: 'white',
+          padding: '20px',
+          borderRadius: '8px',
+          boxShadow: '0 4px 12px rgba(0,0,0,0.15)',
+          zIndex: 9999
+        }}>
+          <p>Migrating chat history to database...</p>
+        </div>
+      )}
       <Sidebar 
         sessions={sessions}
         currentSessionId={currentSessionId}

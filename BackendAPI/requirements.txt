@@ -3,3 +3,7 @@ uvicorn[standard]
 pydantic
 boto3
 botocore
+sqlalchemy
+psycopg2-binary
+python-dotenv
+requests

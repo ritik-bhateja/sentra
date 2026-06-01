@@ -4,3 +4,18 @@ Backend/layer/*
 layer/*
 Backend/lambda_package/*
 aws_env/*
+
+# Environment variables (contains sensitive data)
+BackendAPI/.env
+.env
+
+# Python cache
+BackendAPI/__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.Python
+
+# Database
+*.db
+*.sqlite3
