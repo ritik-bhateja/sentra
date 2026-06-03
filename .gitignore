@@ -5,9 +5,10 @@ layer/*
 Backend/lambda_package/*
 aws_env/*
 
-# Environment variables (contains sensitive data)
-BackendAPI/.env
+# Environment variables
 .env
+*.env
+!.env.example
 
 # Python cache
 BackendAPI/__pycache__/
