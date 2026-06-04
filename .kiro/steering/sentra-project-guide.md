@@ -9,11 +9,13 @@ inclusion: always
 **Sentra** is an AI-powered banking and insurance chatbot system that enables users to query banking and insurance data through natural language. The system uses AWS Bedrock Agent Core with Claude Sonnet 4 to generate SQL queries against AWS Athena databases and return results in both text and visual formats (charts).
 
 **Key Features:**
+- Google OAuth2 authentication with JWT tokens
 - Natural language to SQL query generation
 - Dual database support (banking + insurance)
 - Role-based access control (RBAC)
 - Chart visualizations (bar, line, pie, scatter)
-- Conversation memory
+- PostgreSQL RDS-based chat history storage
+- Multi-session conversation management
 - React frontend with chat interface
 
 ## Architecture Overview
@@ -22,20 +24,30 @@ inclusion: always
 ┌─────────────────────────────────────────────────────────────────┐
 │                         USER INTERFACE                          │
 │                    (React Frontend - Vite)                      │
-│  - Login/Authentication                                         │
-│  - Chat Interface                                               │
+│  - Google OAuth Login                                           │
+│  - Chat Interface with Session Management                       │
 │  - Chart Rendering (Recharts)                                   │
-│  - Customer List View                                           │
+│  - User Profile Display                                         │
 └────────────────────┬────────────────────────────────────────────┘
-                     │ HTTP POST /query
-                     │ {user_query, user_id}
+                     │ HTTP POST with JWT Cookie
+                     │ {user_query, user_id, session_id}
                      ▼
 ┌─────────────────────────────────────────────────────────────────┐
-│                      FLASK API LAYER                            │
-│                   (Backend/Agent_Trigger.py)                    │
-│  - CORS enabled for all origins                                 │
-│  - /query endpoint → Bedrock AgentCore                          │
-│  - /users endpoint → Direct Athena query                        │
+│                  AUTHENTICATION MIDDLEWARE                      │
+│                   (BackendAPI/auth/middleware.py)               │
+│  - Validate HTTP-only JWT cookie                                │
+│  - Extract user from token                                      │
+│  - Authorize request                                            │
+└────────────────────┬────────────────────────────────────────────┘
+                     │ Authenticated request
+                     ▼
+┌─────────────────────────────────────────────────────────────────┐
+│                      FASTAPI LAYER                              │
+│                   (BackendAPI/Agent_Trigger.py)                 │
+│  - Protected endpoints with Depends(get_current_user)           │
+│  - /query endpoint → Bedrock AgentCore + RDS storage            │
+│  - /api/sessions/* → Session management                         │
+│  - /auth/* → OAuth flow                                         │
 └────────────────────┬────────────────────────────────────────────┘
                      │ boto3.client('bedrock-agentcore')
                      │ invoke_agent_runtime()
@@ -89,15 +101,23 @@ inclusion: always
 │  │  - INSURANCE_DATA (142 columns)                          │  │
 │  └──────────────────────────────────────────────────────────┘  │
 └────────────────────┬────────────────────────────────────────────┘
-                     │ Query results
+                     │ Query results + RDS storage
                      ▼
 ┌─────────────────────────────────────────────────────────────────┐
-│                    MEMORY SYSTEM                                │
-│              (Backend/memory/memory_hook.py)                    │
-│  - Bedrock AgentCore Memory Client                              │
-│  - Stores conversation history                                  │
-│  - Loads last 5 turns on agent init                             │
-│  - Event expiry: 7 days                                         │
+│                    DUAL MEMORY SYSTEM                           │
+│  ┌──────────────────────────────────────────────────────────┐  │
+│  │  Bedrock AgentCore Memory (Backend/memory/)              │  │
+│  │  - In-memory conversation context                        │  │
+│  │  - Loads last 5 turns on agent init                      │  │
+│  │  - Event expiry: 7 days                                  │  │
+│  └──────────────────────────────────────────────────────────┘  │
+│  ┌──────────────────────────────────────────────────────────┐  │
+│  │  PostgreSQL RDS (BackendAPI/database.py)                 │  │
+│  │  - Persistent chat history storage                       │  │
+│  │  - Session and turn management                           │  │
+│  │  - Multi-session support per user                        │  │
+│  │  - User authentication records                           │  │
+│  └──────────────────────────────────────────────────────────┘  │
 └─────────────────────────────────────────────────────────────────┘
 ```
 
@@ -160,33 +180,50 @@ Sentra/
 │   │   ├── sample_insurance_prompts.md
 │   │   └── column_explanations.md
 │   ├── main.py                    # AgentCore entrypoint
-│   ├── Agent_Trigger.py           # Flask API server
-│   ├── Agent_CICD.py              # CI/CD utilities
 │   ├── requirements.txt           # Python dependencies
 │   └── Dockerfile                 # Container configuration
+├── BackendAPI/
+│   ├── auth/
+│   │   ├── __init__.py            # Auth module initialization
+│   │   ├── oauth.py               # Google OAuth2 handler
+│   │   ├── jwt_handler.py         # JWT token management
+│   │   └── middleware.py          # Authentication middleware
+│   ├── Agent_Trigger.py           # FastAPI server with auth
+│   ├── database.py                # PostgreSQL connection management
+│   ├── models_v3.py               # SQLAlchemy models (User, ChatSession, ConversationTurn)
+│   ├── auth_schema.sql            # User authentication schema
+│   ├── database_schema_v3.sql     # Chat session schema
+│   ├── add_authorized_user.py     # User management script
+│   ├── requirements.txt           # Python dependencies
+│   └── .env                       # Environment configuration
 ├── Frontend/
 │   ├── src/
 │   │   ├── components/
-│   │   │   ├── ChatInterface.jsx  # Main chat UI
+│   │   │   ├── ChatInterface.jsx  # Main chat UI with RDS integration
 │   │   │   ├── ChatMessage.jsx    # Message rendering
 │   │   │   ├── ChartView.jsx      # Chart visualization
-│   │   │   ├── CustomerList.jsx   # Customer list view
-│   │   │   ├── CustomerCard.jsx   # Customer card component
-│   │   │   ├── Login.jsx          # Login screen
-│   │   │   ├── Sidebar.jsx        # Navigation sidebar
-│   │   │   └── UserProfile.jsx    # User profile display
+│   │   │   ├── Login.jsx          # Google OAuth login screen
+│   │   │   ├── Sidebar.jsx        # Session navigation sidebar
+│   │   │   ├── UserProfile.jsx    # Dynamic user profile
+│   │   │   └── ProtectedRoute.jsx # Route authentication guard
+│   │   ├── contexts/
+│   │   │   └── AuthContext.jsx    # Authentication state management
+│   │   ├── services/
+│   │   │   ├── authApi.js         # Authentication API calls
+│   │   │   └── chatApi.js         # Chat session API calls
 │   │   ├── App.jsx                # Main app component
 │   │   └── main.jsx               # React entry point
-│   ├── public/
-│   │   └── images/customers/      # Customer profile images
 │   ├── package.json               # Node dependencies
 │   └── vite.config.js             # Vite configuration
 ├── .kiro/
 │   ├── specs/
-│   │   └── insurance-schema-update/
-│   │       ├── requirements.md    # Feature requirements
-│   │       ├── design.md          # Design document
-│   │       └── tasks.md           # Implementation tasks
+│   │   ├── insurance-schema-update/
+│   │   │   ├── requirements.md    # Feature requirements
+│   │   │   ├── design.md          # Design document
+│   │   │   └── tasks.md           # Implementation tasks
+│   │   └── google-oauth2-auth/
+│   │       ├── requirements.md    # OAuth requirements
+│   │       └── design.md          # OAuth design
 │   ├── steering/
 │   │   └── sentra-project-guide.md  # This file
 │   └── sample_data/
@@ -253,6 +290,365 @@ Sentra/
 - Miscellaneous (20 columns): run_year, run_month, ckyc_number, etc.
 
 **Note:** No CIF_NO field - cannot join with banking tables (separate database)
+
+## Authentication System
+
+### Google OAuth2 Flow
+
+**Sentra uses Google OAuth2 for user authentication with JWT token-based session management.**
+
+**Authentication Flow:**
+
+```mermaid
+sequenceDiagram
+    participant User as User (Browser)
+    participant Frontend as React Frontend
+    participant Backend as FastAPI Backend
+    participant Google as Google OAuth
+    participant RDS as PostgreSQL RDS
+    
+    User->>Frontend: Click "Sign in with Google"
+    Frontend->>Backend: GET /auth/google
+    Backend->>Google: Redirect to Google OAuth
+    Google->>User: Show Google login
+    User->>Google: Authenticate + consent
+    Google->>Backend: Redirect with auth code
+    Backend->>Google: Exchange code for user info
+    Google-->>Backend: Return user email & profile
+    Backend->>RDS: Check if user exists in users table
+    alt User exists (authorized)
+        RDS-->>Backend: User found
+        Backend->>Backend: Generate JWT token
+        Backend->>Frontend: Redirect with HTTP-only cookie
+        Frontend->>Backend: All API calls include cookie
+    else User not found (unauthorized)
+        RDS-->>Backend: User not found
+        Backend->>Frontend: Redirect to /login?error=access_denied
+        Frontend->>User: Show "Access Denied" message
+    end
+```
+
+### Authentication Components
+
+#### 1. OAuth Handler (`BackendAPI/auth/oauth.py`)
+- Manages Google OAuth2 flow
+- Generates authorization URLs with state parameter
+- Exchanges authorization codes for user information
+- Scopes: `openid`, `email`, `profile`
+
+#### 2. JWT Handler (`BackendAPI/auth/jwt_handler.py`)
+- Creates JWT tokens with user ID and email
+- Tokens expire after 7 days (configurable)
+- Uses HS256 algorithm
+- Verifies and decodes tokens
+
+#### 3. Authentication Middleware (`BackendAPI/auth/middleware.py`)
+- `get_current_user()` dependency for FastAPI endpoints
+- Extracts JWT from HTTP-only cookie (`sentra_jwt_token`)
+- Validates token and retrieves user from database
+- Returns 401 Unauthorized if invalid/missing token
+
+#### 4. Frontend Auth Context (`Frontend/src/contexts/AuthContext.jsx`)
+- Manages authentication state (user, loading, isAuthenticated)
+- Provides `login()`, `logout()`, `checkAuth()` functions
+- Automatically checks auth on app load
+- Handles HTTP-only cookies (sent automatically by browser)
+
+### Access Control Model
+
+**⚠️ CRITICAL: Only pre-registered users can access the application**
+
+**User Registration Process:**
+1. Admin manually adds authorized users to PostgreSQL RDS
+2. Use script: `python BackendAPI/add_authorized_user.py add <email>`
+3. User email is stored in `users` table
+
+**Login Process:**
+1. User authenticates via Google OAuth
+2. Backend checks if email exists in `users` table
+3. **If user exists:** Generate JWT token, set cookie, allow access
+4. **If user doesn't exist:** Redirect to login with `access_denied` error
+
+**Authorization Enforcement:**
+- All API endpoints protected with `Depends(get_current_user)`
+- Frontend routes protected with `<ProtectedRoute>` component
+- Unauthorized requests return 401 status
+- No automatic user creation - explicit registration required
+
+### User Management
+
+**Add Authorized User:**
+```bash
+python BackendAPI/add_authorized_user.py add user@example.com
+```
+
+**List Authorized Users:**
+```bash
+python BackendAPI/add_authorized_user.py list
+```
+
+**Remove User:**
+```bash
+python BackendAPI/add_authorized_user.py remove user@example.com
+```
+
+### Authentication Endpoints
+
+| Endpoint | Method | Description | Authentication |
+|----------|--------|-------------|----------------|
+| `/auth/google` | GET | Initiate Google OAuth flow | Public |
+| `/auth/google/callback` | GET | Handle OAuth callback, set JWT cookie | Public |
+| `/auth/logout` | POST | Logout user, clear cookie | Required |
+| `/auth/me` | GET | Get current user info | Required |
+| `/auth/verify` | GET | Verify JWT token validity | Required |
+
+## Chat History System (PostgreSQL RDS)
+
+### Overview
+
+Chat history is stored in **PostgreSQL RDS** (not localStorage) for persistence, multi-device access, and data integrity.
+
+**RDS Configuration:**
+- **Host:** `database-2-instance-1.crwu46wug6kx.ap-south-1.rds.amazonaws.com`
+- **Port:** 5432
+- **Database:** `company_db`
+- **User:** `postgres`
+- **SSL Mode:** require
+
+### Database Schema (V3)
+
+#### Table 1: `users`
+```sql
+CREATE TABLE users (
+    id SERIAL PRIMARY KEY,
+    email VARCHAR(255) UNIQUE NOT NULL,
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+    last_login TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+);
+```
+
+**Purpose:** Store authorized users for OAuth access control
+
+#### Table 2: `chat_sessions`
+```sql
+CREATE TABLE chat_sessions (
+    session_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    user_id VARCHAR(100) NOT NULL,
+    session_title VARCHAR(500),
+    status VARCHAR(20) DEFAULT 'ACTIVE' CHECK (status IN ('ACTIVE', 'ARCHIVED', 'DELETED')),
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+    last_activity_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE INDEX idx_user_sessions ON chat_sessions(user_id, last_activity_at);
+CREATE INDEX idx_session_status ON chat_sessions(status, updated_at);
+```
+
+**Purpose:** Track individual chat sessions per user
+
+**Key Features:**
+- UUID primary key for unique identification
+- Soft delete via status field (ACTIVE/ARCHIVED/DELETED)
+- Last activity tracking for session ordering
+- Multi-session support per user
+
+#### Table 3: `conversation_turns`
+```sql
+CREATE TABLE conversation_turns (
+    turn_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    session_id UUID NOT NULL REFERENCES chat_sessions(session_id) ON DELETE CASCADE,
+    turn_number INTEGER NOT NULL,
+    user_query TEXT NOT NULL,
+    assistant_response JSONB,
+    model_name VARCHAR(100) DEFAULT 'moonshotai.kimi-k2.5',
+    status VARCHAR(20) DEFAULT 'COMPLETED' CHECK (status IN ('PENDING', 'RUNNING', 'COMPLETED', 'FAILED')),
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+    completed_at TIMESTAMP WITH TIME ZONE,
+    error_message TEXT,
+    UNIQUE(session_id, turn_number)
+);
+
+CREATE INDEX idx_session_turns ON conversation_turns(session_id, turn_number);
+CREATE INDEX idx_turn_status ON conversation_turns(status, created_at);
+CREATE INDEX idx_assistant_response ON conversation_turns USING gin(assistant_response);
+```
+
+**Purpose:** Store individual conversation turns (user query + agent response)
+
+**Key Features:**
+- Auto-incrementing turn numbers per session
+- JSONB storage for assistant response (type, data, explanation, chart info)
+- Turn status tracking (PENDING → RUNNING → COMPLETED/FAILED)
+- Cascading delete when session deleted
+- GIN index on JSONB for efficient querying
+
+### Session Management API
+
+#### Create Session
+```http
+POST /api/sessions
+Authorization: Cookie (sentra_jwt_token)
+Body: {
+  "user_id": "user@example.com",
+  "session_title": "New Chat"
+}
+Response: {
+  "id": "uuid",
+  "user_id": "user@example.com",
+  "title": "New Chat",
+  "status": "ACTIVE",
+  "createdAt": 1234567890,
+  "updatedAt": 1234567890,
+  "lastActivityAt": 1234567890
+}
+```
+
+#### Get User Sessions
+```http
+GET /api/sessions/{user_id}
+Authorization: Cookie (sentra_jwt_token)
+Response: [
+  {
+    "id": "uuid",
+    "user_id": "user@example.com",
+    "title": "Insurance Analysis",
+    "status": "ACTIVE",
+    "createdAt": 1234567890,
+    "updatedAt": 1234567890,
+    "lastActivityAt": 1234567890
+  }
+]
+```
+
+#### Get Session Turns (Messages)
+```http
+GET /api/sessions/{session_id}/turns
+Authorization: Cookie (sentra_jwt_token)
+Response: [
+  {
+    "id": "turn_id_user",
+    "type": "user",
+    "content": "How many policies do we have?",
+    "timestamp": 1234567890
+  },
+  {
+    "id": "turn_id_bot",
+    "type": "bot",
+    "content": {
+      "type": "text",
+      "data": "150",
+      "explanation": "There are 150 active policies"
+    },
+    "timestamp": 1234567891
+  }
+]
+```
+
+#### Update Session
+```http
+PUT /api/sessions/{session_id}
+Authorization: Cookie (sentra_jwt_token)
+Body: {
+  "session_title": "Policy Analysis Q1",
+  "status": "ARCHIVED"
+}
+```
+
+#### Delete Session
+```http
+DELETE /api/sessions/{session_id}
+Authorization: Cookie (sentra_jwt_token)
+Response: {
+  "message": "Session deleted successfully",
+  "session_id": "uuid"
+}
+```
+
+### Query Endpoint Integration
+
+The `/query` endpoint automatically manages sessions and turns:
+
+```http
+POST /query
+Authorization: Cookie (sentra_jwt_token)
+Body: {
+  "user_query": "Show me policy count by type",
+  "user_id": "user@example.com",
+  "session_id": "uuid-optional"  // Creates new if not provided
+}
+Response: {
+  "type": "bar",
+  "data": [...],
+  "explanation": "...",
+  "session_id": "uuid",
+  "turn_number": 1
+}
+```
+
+**Automatic Behavior:**
+1. If `session_id` provided → Use existing session
+2. If no `session_id` → Create new session automatically
+3. Create `ConversationTurn` with status RUNNING
+4. Call Bedrock AgentCore
+5. Update turn with response and status COMPLETED
+6. Return response with session_id and turn_number
+
+### Frontend Integration
+
+**Session Loading:**
+```javascript
+// Load all user sessions on ChatInterface mount
+const loadSessions = async () => {
+  const sessions = await chatApi.getSessions(user.email);
+  setSessions(sessions);
+};
+```
+
+**Message Loading:**
+```javascript
+// Load messages when session selected
+const loadMessages = async (sessionId) => {
+  const turns = await chatApi.getSessionMessages(sessionId);
+  setMessages(turns);  // Array of user/bot messages
+};
+```
+
+**Sending Messages:**
+```javascript
+// Send message with current session_id
+const response = await fetch('/query', {
+  method: 'POST',
+  credentials: 'include',  // Include cookies
+  body: JSON.stringify({
+    user_query: message,
+    user_id: user.email,
+    session_id: currentSessionId
+  })
+});
+```
+
+### Dual Memory Architecture
+
+Sentra uses **two separate memory systems**:
+
+#### 1. Bedrock AgentCore Memory (Short-term)
+- **Purpose:** Provide conversation context to AI agent
+- **Storage:** AWS Bedrock Memory service
+- **Duration:** 7 days
+- **Scope:** Last 5 turns loaded on agent initialization
+- **Use Case:** Agent needs recent context for follow-up questions
+
+#### 2. PostgreSQL RDS (Long-term)
+- **Purpose:** Persistent chat history storage
+- **Storage:** RDS PostgreSQL database
+- **Duration:** Indefinite (until manually deleted)
+- **Scope:** All sessions and turns
+- **Use Case:** User can view all past conversations, switch sessions
+
+**Why Both?**
+- Bedrock memory optimized for agent context (fast, temporary)
+- RDS optimized for user experience (persistent, queryable, multi-session)
 
 ## Access Control (RBAC)
 
@@ -386,19 +782,24 @@ The agent returns JSON responses in 4 formats:
 
 ### Backend
 - **Python 3.x**
-- **Flask** - REST API server
+- **FastAPI** - Modern REST API framework (replaced Flask)
+- **SQLAlchemy** - ORM for PostgreSQL
+- **PostgreSQL** - RDS database for chat history
 - **boto3** - AWS SDK
 - **Strands** - Agent framework
 - **bedrock-agentcore** - AWS Bedrock Agent Core
 - **AWS Bedrock** - Claude Sonnet 4 (apac.anthropic.claude-sonnet-4-20250514-v1:0)
 - **AWS Athena** - SQL query engine
 - **AWS S3** - Query result storage
+- **Google OAuth2** - Authentication
+- **PyJWT** - JWT token management
 
 ### Frontend
 - **React 18**
 - **Vite** - Build tool
 - **Recharts** - Chart library
 - **Lucide React** - Icons
+- **React Router** - Navigation
 - **CSS3** - Styling
 
 ### AWS Services
@@ -407,17 +808,45 @@ The agent returns JSON responses in 4 formats:
 - **Athena** - SQL queries
 - **S3** - Data storage
 - **IAM** - Access control
+- **RDS PostgreSQL** - Chat history database
 
 ## Environment Configuration
 
-### Backend Environment Variables
+### Backend Environment Variables (`BackendAPI/.env`)
 ```bash
+# AWS Configuration
 AWS_REGION=ap-south-1
 AWS_ACCESS_KEY_ID=<your-key>
 AWS_SECRET_ACCESS_KEY=<your-secret>
+
+# PostgreSQL RDS Configuration
+DB_HOST=database-2-instance-1.crwu46wug6kx.ap-south-1.rds.amazonaws.com
+DB_PORT=5432
+DB_NAME=company_db
+DB_USER=postgres
+DB_PASSWORD=lumiq121
+DB_SSLMODE=require
+
+# Google OAuth2 Configuration
+GOOGLE_CLIENT_ID=40258988075-qkf1n10uv3qlap8fqefmplm6lo987gou.apps.googleusercontent.com
+GOOGLE_CLIENT_SECRET=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
+GOOGLE_REDIRECT_URI=http://localhost:5000/auth/google/callback
+
+# JWT Configuration
+JWT_SECRET_KEY=<your-secret-key>
+JWT_ALGORITHM=HS256
+JWT_EXPIRATION_DAYS=7
+
+# Cookie Configuration
+COOKIE_SECURE=False  # Set True for HTTPS in production
+COOKIE_SAMESITE=lax
+COOKIE_DOMAIN=localhost
+
+# Frontend URL
+FRONTEND_URL=http://localhost:5173
 ```
 
-### Frontend Environment Variables
+### Frontend Environment Variables (`Frontend/.env`)
 ```bash
 VITE_API_URL=http://localhost:5000
 ```
@@ -427,16 +856,53 @@ VITE_API_URL=http://localhost:5000
 AgentCore Runtime ARN: arn:aws:bedrock-agentcore:ap-south-1:628897991744:runtime/Sentra_Agent-vtVCPEFWbx
 S3 Output Location: s3://bedrock-agentcore-runtime-628897991744-ap-south-1-3m5mgapsu7/QueryOutput/
 Memory Name: Sentra_Agent_Memory
+RDS Instance: database-2-instance-1.crwu46wug6kx.ap-south-1.rds.amazonaws.com
+Database Name: company_db
 Region: ap-south-1
+```
+
+### Google OAuth2 Configuration
+```
+Client ID: 40258988075-qkf1n10uv3qlap8fqefmplm6lo987gou.apps.googleusercontent.com
+Authorized Redirect URI: http://localhost:5000/auth/google/callback
+Authorized JavaScript Origins: http://localhost:5000, http://localhost:5173
 ```
 
 ## Development Workflow
 
+### Initial Setup
+
+**1. PostgreSQL RDS Setup:**
+```bash
+cd BackendAPI
+# Create database schema
+psql -h database-2-instance-1.crwu46wug6kx.ap-south-1.rds.amazonaws.com \
+     -U postgres -d company_db -f auth_schema.sql
+psql -h database-2-instance-1.crwu46wug6kx.ap-south-1.rds.amazonaws.com \
+     -U postgres -d company_db -f database_schema_v3.sql
+
+# Add authorized users
+python add_authorized_user.py add admin@example.com
+python add_authorized_user.py list
+```
+
+**2. Environment Configuration:**
+```bash
+# Configure BackendAPI/.env with database and OAuth credentials
+cp BackendAPI/.env.example BackendAPI/.env
+# Edit .env with your credentials
+
+# Configure Frontend/.env
+cp Frontend/.env.example Frontend/.env
+# Set VITE_API_URL=http://localhost:5000
+```
+
 ### Running Backend
 ```bash
-cd Backend
+cd BackendAPI
 pip install -r requirements.txt
-python Agent_Trigger.py  # Starts Flask on port 5000
+python Agent_Trigger.py  # Starts FastAPI on port 5000
+# Or use: uvicorn Agent_Trigger:app --reload --port 5000
 ```
 
 ### Running Frontend
@@ -444,6 +910,20 @@ python Agent_Trigger.py  # Starts Flask on port 5000
 cd Frontend
 npm install
 npm run dev  # Starts Vite dev server on port 5173
+```
+
+### User Management
+```bash
+cd BackendAPI
+
+# Add authorized user
+python add_authorized_user.py add user@example.com
+
+# List all users
+python add_authorized_user.py list
+
+# Remove user
+python add_authorized_user.py remove user@example.com
 ```
 
 ### Testing
@@ -502,14 +982,105 @@ python tests/validate_final_prompt.py
 
 ## Troubleshooting
 
-### Agent Returns Wrong Database
+### Authentication Issues
+
+#### OAuth Callback Error: "Invalid state parameter"
+**Symptom:** User redirected to callback with invalid state error
+**Solution:**
+- For development: State validation relaxed (states stored in memory)
+- For production: Use Redis or database to persist OAuth states
+- Verify GOOGLE_REDIRECT_URI matches Google Console configuration
+- Check FRONTEND_URL environment variable is correct
+
+#### "Access Denied" on Login
+**Symptom:** User successfully authenticates with Google but sees "Access Denied"
+**Solution:**
+- User email not in `users` table (only pre-registered users allowed)
+- Add user: `python add_authorized_user.py add user@example.com`
+- Verify user exists: `python add_authorized_user.py list`
+- Check OAuth callback logs for email mismatch
+
+#### "Not authenticated" Error on API Calls
+**Symptom:** API returns 401 Unauthorized
+**Solution:**
+- JWT cookie not set or expired (7-day expiration)
+- Verify cookie exists in browser DevTools → Application → Cookies
+- Check `COOKIE_DOMAIN` matches your domain (use `localhost` for dev)
+- Ensure `credentials: 'include'` in frontend fetch calls
+- Verify `allow_credentials=True` in CORS configuration
+
+#### Cookie Not Being Set
+**Symptom:** Login successful but user not authenticated
+**Solution:**
+- Check cookie configuration in FastAPI response
+- Verify `httponly=True`, `samesite='lax'`, `secure=False` (dev)
+- For production: Set `secure=True` and use HTTPS
+- Check browser console for cookie rejection warnings
+- Verify frontend and backend on same domain (or proper CORS setup)
+
+### Database Connection Issues
+
+#### RDS Connection Timeout
+**Symptom:** "Connection timed out" when connecting to RDS
+**Solution:**
+- Check RDS security group allows inbound traffic on port 5432
+- Verify your IP address is whitelisted in security group
+- Confirm VPC and network configuration
+- Test with: `python BackendAPI/database.py`
+
+#### "Database connection failed" Error
+**Symptom:** FastAPI starts but database connection fails
+**Solution:**
+- Verify DB_HOST, DB_PORT, DB_NAME in .env
+- Check DB_USER and DB_PASSWORD are correct
+- Ensure DB_SSLMODE=require for RDS
+- Test connection: `psql -h $DB_HOST -U $DB_USER -d $DB_NAME`
+
+#### "Table does not exist" Error
+**Symptom:** SQL error about missing tables
+**Solution:**
+- Run schema creation scripts:
+  ```bash
+  psql -h $DB_HOST -U $DB_USER -d $DB_NAME -f auth_schema.sql
+  psql -h $DB_HOST -U $DB_USER -d $DB_NAME -f database_schema_v3.sql
+  ```
+- Verify tables created: `\dt` in psql
+
+### Session Management Issues
+
+#### Sessions Not Loading
+**Symptom:** Sidebar shows no sessions or empty
+**Solution:**
+- Check user is authenticated (JWT cookie valid)
+- Verify user_id in database matches email from OAuth
+- Check browser console for API errors
+- Verify `/api/sessions/{user_id}` endpoint returns data
+
+#### Messages Not Saving
+**Symptom:** Chat works but history not persisted
+**Solution:**
+- Check `/query` endpoint creates turn records
+- Verify session_id passed in request
+- Check database for ConversationTurn entries
+- Review API logs for database errors
+
+#### Turn Number Conflicts
+**Symptom:** "UNIQUE constraint violation" on turn_number
+**Solution:**
+- Database trigger auto-increments turn_number (should not happen)
+- Check if manual turn creation bypasses trigger
+- Verify session_id is correct UUID format
+
+### Agent & Query Issues
+
+#### Agent Returns Wrong Database
 **Symptom:** Insurance queries go to sentra_db or vice versa
 **Solution:** 
 - Check query keywords match database selection rules
 - Verify `database` parameter in athena_query tool call
 - Review agent logs for database selection
 
-### Charts Not Rendering
+#### Charts Not Rendering
 **Symptom:** Data returned but chart doesn't display
 **Solution:**
 - Verify response type is "bar", "line", "pie", or "scatter"
@@ -517,7 +1088,7 @@ python tests/validate_final_prompt.py
 - Inspect browser console for errors
 - Verify Recharts is installed
 
-### Access Violation Not Working (Banking Queries Only)
+#### Access Violation Not Working (Banking Queries Only)
 **Symptom:** Users can see banking data outside their CIF range
 **Solution:**
 - Check user_id is passed correctly from frontend
@@ -526,15 +1097,15 @@ python tests/validate_final_prompt.py
 - Review SQL query in response
 **Note:** Insurance queries (insurance_db) have NO access restrictions by design
 
-### Memory Not Persisting
+#### Memory Not Persisting
 **Symptom:** Agent doesn't remember previous conversation
 **Solution:**
-- Check memory_id is set correctly
+- Check memory_id is set correctly in Bedrock AgentCore
 - Verify actor_id and session_id in agent state
 - Check memory expiry (7 days default)
-- Review memory hook logs
+- Note: Long-term history in RDS, short-term context in Bedrock Memory
 
-### Athena Query Timeout
+#### Athena Query Timeout
 **Symptom:** Query takes too long or times out
 **Solution:**
 - Optimize SQL query (add WHERE clauses, LIMIT)
@@ -576,12 +1147,17 @@ python tests/validate_final_prompt.py
 - Monitor query execution times
 
 ### Security
-- Never expose AWS credentials
+- Never expose AWS credentials or database passwords
 - **Enforce RBAC at prompt level for sentra_db ONLY**
 - **No RBAC enforcement for insurance_db**
-- Validate user inputs
-- Use IAM roles for AWS access
+- **Only pre-registered users can login (no auto-registration)**
+- Store JWT tokens in HTTP-only cookies (not localStorage)
+- Use secure cookies (HTTPS) in production
+- Validate user authentication on all protected endpoints
 - Sanitize SQL queries (Athena handles this)
+- Use IAM roles for AWS access
+- Rotate JWT_SECRET_KEY regularly
+- Implement rate limiting on auth endpoints (production)
 
 ## Sample Queries
 
@@ -613,6 +1189,23 @@ python tests/validate_final_prompt.py
 
 ## Recent Updates
 
+### Google OAuth2 Authentication (June 2026)
+- Implemented Google OAuth2 with JWT token-based authentication
+- HTTP-only cookie storage for security
+- Pre-registered user access control (no auto-registration)
+- User management script for authorization
+- Protected all API endpoints with authentication middleware
+- Frontend AuthContext and ProtectedRoute components
+
+### PostgreSQL RDS Chat History (June 2026)
+- Migrated from localStorage to PostgreSQL RDS
+- UUID-based session management
+- Conversation turns with auto-sequencing
+- Dual memory system (Bedrock + RDS)
+- Multi-session support per user
+- Session CRUD operations via REST API
+- Frontend integration with session sidebar
+
 ### Insurance Schema Update (Dec 2025)
 - Migrated from 2-table structure (INSURANCE_POLICIES, INSURANCE_CLAIMS) to single INSURANCE_DATA table
 - Added all 142 columns with data types
@@ -628,10 +1221,25 @@ python tests/validate_final_prompt.py
 ## Support and Documentation
 
 ### Internal Documentation
+- `.kiro/specs/google-oauth2-auth/` - OAuth authentication specs
 - `.kiro/specs/insurance-schema-update/` - Schema update specs
 - `Backend/tests/sample_insurance_prompts.md` - Query examples
 - `Backend/tests/column_explanations.md` - Column definitions
 - `Backend/tests/visualization_preference_update.md` - Chart guidelines
+- `BackendAPI/API_ENDPOINTS.md` - API endpoint documentation
+- `BackendAPI/V3_IMPLEMENTATION_GUIDE.md` - V3 migration guide
+- `BackendAPI/GOOGLE_OAUTH_REQUIRED_CONFIGS.md` - OAuth setup guide
+
+### Configuration Files
+- `BackendAPI/.env` - Backend environment variables
+- `BackendAPI/auth_schema.sql` - User authentication schema
+- `BackendAPI/database_schema_v3.sql` - Chat session schema
+- `Frontend/.env` - Frontend environment variables
+
+### Management Scripts
+- `BackendAPI/add_authorized_user.py` - User management
+- `BackendAPI/setup_database.py` - Database initialization
+- `BackendAPI/test_rds_connection.py` - Connection testing
 
 ### External Resources
 - AWS Bedrock Documentation
@@ -644,7 +1252,9 @@ python tests/validate_final_prompt.py
 **Project:** Sentra Banking & Insurance AI Chatbot
 **AWS Account:** 628897991744
 **Region:** ap-south-1 (Mumbai)
-**Last Updated:** December 2025
+**Database:** PostgreSQL RDS (company_db)
+**Authentication:** Google OAuth2 with JWT
+**Last Updated:** June 2026
 
 ---
 
