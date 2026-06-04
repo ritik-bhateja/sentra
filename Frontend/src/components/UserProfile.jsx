@@ -1,22 +1,26 @@
-import { useState } from 'react'
+import { useAuth } from '../contexts/AuthContext'
 import './UserProfile.css'
 
 function UserProfile({ onClose, onLogout }) {
-  const userId = localStorage.getItem('sentra_user_id') || 'user'
-  const [user] = useState({
-    name: userId,
-    email: `${userId}@sentra.com`,
-    role: 'Senior Insurance Analyst',
-    department: 'Financial Analytics',
-    joinDate: 'January 2023'
-  })
+  const { user } = useAuth()
+  
+  // Extract name from email (first part before @)
+  const displayName = user?.email?.split('@')[0] || 'User'
+  
+  // Get first letter for avatar
+  const avatarInitial = displayName.charAt(0).toUpperCase()
+  
+  // Format join date from user creation timestamp
+  const joinDate = user?.created_at 
+    ? new Date(user.created_at).toLocaleDateString('en-US', { year: 'numeric', month: 'long' })
+    : 'Recently'
 
   return (
     <div className="profile-overlay" onClick={onClose}>
       <div className="profile-modal" onClick={(e) => e.stopPropagation()}>
         <div className="profile-header">
           <div className="profile-avatar">
-            <span>{user.name.split(' ').map(n => n[0]).join('')}</span>
+            <span>{avatarInitial}</span>
           </div>
           <button className="profile-close" onClick={onClose}>
             <svg width="20" height="20" viewBox="0 0 20 20" fill="none">
@@ -26,21 +30,21 @@ function UserProfile({ onClose, onLogout }) {
         </div>
         
         <div className="profile-content">
-          <h2>{user.name}</h2>
-          <p className="profile-role">{user.role}</p>
+          <h2>{displayName}</h2>
+          <p className="profile-role">Insurance Assistant User</p>
           
           <div className="profile-details">
             <div className="profile-detail-item">
-              <span className="detail-label">Email</span>
-              <span className="detail-value">{user.email}</span>
+              <span className="detail-label">EMAIL</span>
+              <span className="detail-value">{user?.email}</span>
             </div>
             <div className="profile-detail-item">
-              <span className="detail-label">Department</span>
-              <span className="detail-value">{user.department}</span>
+              <span className="detail-label">USER ID</span>
+              <span className="detail-value">{user?.id}</span>
             </div>
             <div className="profile-detail-item">
-              <span className="detail-label">Member Since</span>
-              <span className="detail-value">{user.joinDate}</span>
+              <span className="detail-label">MEMBER SINCE</span>
+              <span className="detail-value">{joinDate}</span>
             </div>
           </div>
         </div>

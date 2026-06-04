@@ -8,6 +8,22 @@ from sqlalchemy.orm import relationship
 from database import Base
 import uuid
 
+class User(Base):
+    __tablename__ = "users"
+    
+    id = Column(Integer, primary_key=True, index=True)
+    email = Column(String(255), unique=True, nullable=False, index=True)
+    created_at = Column(TIMESTAMP(timezone=True), server_default=func.now())
+    last_login = Column(TIMESTAMP(timezone=True), server_default=func.now())
+    
+    def to_dict(self):
+        return {
+            "id": self.id,
+            "email": self.email,
+            "created_at": int(self.created_at.timestamp() * 1000) if self.created_at else None,
+            "last_login": int(self.last_login.timestamp() * 1000) if self.last_login else None
+        }
+
 class ChatSession(Base):
     __tablename__ = "chat_sessions"
     

@@ -7,7 +7,7 @@ from strands import tool
     name="athena_query",
     description="""Execute SQL queries on AWS Athena insurance database.
 
-CRITICAL: All queries use the insurance_db database which contains the INSURANCE_DATA table with comprehensive policy information including:
+CRITICAL: All queries use the insurance_db database which contains the insurance_data_vw view with comprehensive policy information including:
 - Policy details (policy_number, policy_type, gwp, sum_insured)
 - Customer information (customer_name, customer_id, customer_dob)
 - Agent information (agent_name, agent_id, agent_category)
@@ -20,7 +20,7 @@ The insurance_db database EXISTS and contains real insurance data.""",
         "properties": {
             "sql": {
                 "type": "string", 
-                "description": "The SQL query to execute against the INSURANCE_DATA table"
+                "description": "The SQL query to execute against the insurance_data_vw view"
             },
             "database": {
                 "type": "string", 

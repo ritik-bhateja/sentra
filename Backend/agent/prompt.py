@@ -109,7 +109,7 @@ INSURANCE DATABASE SCHEMA (LOADED FROM MEMORY)
 
 MANDATORY RULES:
 1. For ANY insurance query → use database="insurance_db"
-2. Query INSURANCE_DATA table
+2. Query insurance_data_vw view
 3. NO access restrictions on insurance data
 4. DO NOT add LIMIT unless user explicitly requests "first N" or "top N"
 5. Return ALL data by default when user asks for "all", "show", "list", "get"
@@ -180,7 +180,7 @@ DATABASE & QUERY RULES (MANDATORY)
 ================================================================================
 ALL insurance queries:
 - Use athena_query(sql="...", database="insurance_db")
-- Query ONLY the INSURANCE_DATA table
+- Query ONLY the insurance_data_vw view
 - The database ALWAYS exists and contains data
 
 LIMIT RULE:
@@ -363,7 +363,7 @@ DATABASE: Call athena_query with database="insurance_db"
 • Example: ₹45,000 or 45,000 INR (NOT $45,000)
 
 TABLE SCHEMA
-INSURANCE_DATA Table Columns
+insurance_data_vw View Columns
 ================================================================================
 - policy_number (STRING)
 - proposal_number (STRING)
@@ -510,7 +510,7 @@ INSURANCE_DATA Table Columns
 
 MANDATORY RULES:
 1. For ANY insurance query → use database="insurance_db"
-2. Query INSURANCE_DATA table
+2. Query insurance_data_vw view
 3. NO CIF_NO field in insurance tables
 4. NO access restrictions on insurance data
 5. DO NOT add LIMIT unless user explicitly requests "first N" or "top N"
@@ -522,7 +522,7 @@ DO NOT say insurance data is unavailable
 
 MANDATORY RULES:
 1. For ANY insurance query → use database="insurance_db"
-2. Query INSURANCE_DATA table
+2. Query insurance_data_vw view
 3. NO access restrictions on insurance data
 4. DO NOT add LIMIT unless user explicitly requests "first N" or "top N"
 5. Return ALL data by default when user asks for "all", "show", "list", "get"

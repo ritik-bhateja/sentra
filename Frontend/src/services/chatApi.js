@@ -15,6 +15,7 @@ async function apiFetch(endpoint, options = {}) {
         'Content-Type': 'application/json',
         ...options.headers,
       },
+      credentials: 'include',  // CRITICAL: Include cookies
       ...options,
     });
 
@@ -108,56 +109,4 @@ export async function sendQuery(userQuery, userId, sessionId, signal) {
     }),
     signal: signal,
   });
-}
-
-/**
- * Migrate localStorage sessions to RDS
- */
-export async function migrateLocalStorageToRDS(userId) {
-  const sessionKey = `sentra_sessions_${userId}`;
-  const localSessions = JSON.parse(localStorage.getItem(sessionKey) || '[]');
-  
-  if (localSessions.length === 0) {
-    console.log('No local sessions to migrate');
-    return { migrated: 0, failed: 0 };
-  }
-
-  console.log(`Migrating ${localSessions.length} sessions to RDS...`);
-  
-  let migrated = 0;
-  let failed = 0;
-
-  for (const session of localSessions) {
-    try {
-      // Create session in RDS
-      await createSession(session.id, userId, session.title);
-      
-      // Save all messages
-      if (session.messages && session.messages.length > 0) {
-        for (const message of session.messages) {
-          await saveMessage(
-            message.id,
-            session.id,
-            message.type,
-            message.content,
-            message.timestamp
-          );
-        }
-      }
-      
-      migrated++;
-      console.log(`✅ Migrated session: ${session.title}`);
-    } catch (error) {
-      failed++;
-      console.error(`❌ Failed to migrate session ${session.id}:`, error);
-    }
-  }
-
-  // Clear localStorage after successful migration
-  if (migrated > 0) {
-    localStorage.removeItem(sessionKey);
-    console.log(`✅ Migration complete: ${migrated} sessions migrated, ${failed} failed`);
-  }
-
-  return { migrated, failed };
 }
