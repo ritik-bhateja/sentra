@@ -517,6 +517,7 @@ function ChatMessage({ message }) {
   
   // Role-based query visibility
   const { role } = useAuth()
+  console.log(role,"line 520");
   const canViewQuery = role === 'admin' || role === 'viewer_with_query'
 
   // Determine response type based on the API response structure

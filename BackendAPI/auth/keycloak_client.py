@@ -109,8 +109,9 @@ class KeycloakClient:
         Requirements: 4.1
         """
         url = f"{self.base_url}/admin/realms/{self.realm}/users"
+        username = email.split("@")[0] if "@" in email else email
         payload = {
-            "username": email,
+            "username": username,
             "email": email,
             "enabled": True,
         }
