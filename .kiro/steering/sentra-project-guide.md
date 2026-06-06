@@ -828,8 +828,8 @@ DB_PASSWORD=lumiq121
 DB_SSLMODE=require
 
 # Google OAuth2 Configuration
-GOOGLE_CLIENT_ID=40258988075-qkf1n10uv3qlap8fqefmplm6lo987gou.apps.googleusercontent.com
-GOOGLE_CLIENT_SECRET=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
+GOOGLE_CLIENT_ID=GOOGLE_CLIENT_ID
+GOOGLE_CLIENT_SECRET=GOOGLE_CLIENT_SECRET
 GOOGLE_REDIRECT_URI=http://localhost:5000/auth/google/callback
 
 # JWT Configuration
@@ -863,7 +863,7 @@ Region: ap-south-1
 
 ### Google OAuth2 Configuration
 ```
-Client ID: 40258988075-qkf1n10uv3qlap8fqefmplm6lo987gou.apps.googleusercontent.com
+Client ID: Client ID:
 Authorized Redirect URI: http://localhost:5000/auth/google/callback
 Authorized JavaScript Origins: http://localhost:5000, http://localhost:5173
 ```
