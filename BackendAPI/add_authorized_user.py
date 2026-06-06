@@ -1,13 +1,21 @@
 """
 Script to add authorized users to the database
 Only users in this table can login to the application
+
+When Keycloak is enabled, newly added users are also created in Keycloak
+with the default role (viewer_without_query). Keycloak failures are logged
+but never block the RDS add operation (Requirements: 3.4, 4.1, 4.4).
 """
 import psycopg2
 from dotenv import load_dotenv
 import os
 import sys
+import logging
 
 load_dotenv()
+
+logger = logging.getLogger(__name__)
+logging.basicConfig(level=logging.INFO)
 
 DB_HOST = os.getenv("DB_HOST")
 DB_PORT = os.getenv("DB_PORT", "5432")
@@ -15,6 +23,38 @@ DB_NAME = os.getenv("DB_NAME")
 DB_USER = os.getenv("DB_USER")
 DB_PASSWORD = os.getenv("DB_PASSWORD")
 DB_SSLMODE = os.getenv("DB_SSLMODE", "require")
+
+def _sync_to_keycloak(email):
+    """Create a Keycloak user with default role after RDS add.
+
+    Failures are logged as warnings but never block the RDS operation.
+    Requirements: 3.4, 4.1, 4.4
+    """
+    try:
+        from auth.keycloak_client import KeycloakClient, KeycloakUnavailable
+        from auth.roles import DEFAULT_ROLE
+    except ImportError as exc:
+        logger.warning("Keycloak modules not available, skipping sync: %s", exc)
+        return
+
+    client = KeycloakClient()
+    if not client.is_enabled():
+        return
+
+    try:
+        if client.user_exists(email):
+            logger.info("Keycloak user already exists for %s, skipping", email)
+            return
+        user_id = client.create_user(email)
+        client.assign_realm_role(user_id, DEFAULT_ROLE)
+        print(f"🔑 Created Keycloak user with default role: {email}")
+    except KeycloakUnavailable as exc:
+        logger.warning("Keycloak sync failed for %s (RDS add still succeeded): %s", email, exc)
+        print(f"⚠️  Keycloak sync failed (user still added to RDS): {exc}")
+    except Exception as exc:
+        logger.warning("Unexpected error during Keycloak sync for %s: %s", email, exc)
+        print(f"⚠️  Keycloak sync failed (user still added to RDS): {exc}")
+
 
 def add_user(email):
     """Add a user to the authorized users list"""
@@ -37,13 +77,16 @@ def add_user(email):
         if existing:
             print(f"⚠️  User already exists: {email}")
         else:
-            # Insert new user
+            # Insert new user into RDS
             cursor.execute(
                 "INSERT INTO users (email) VALUES (%s) RETURNING id, email",
                 (email,)
             )
             user = cursor.fetchone()
             print(f"✅ Added authorized user: {user[1]} (ID: {user[0]})")
+
+            # Post-add hook: create Keycloak user with default role (Req 3.4, 4.1, 4.4)
+            _sync_to_keycloak(email)
         
         cursor.close()
         conn.close()

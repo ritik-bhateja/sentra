@@ -20,10 +20,16 @@ from models_v3 import ChatSession, ConversationTurn, User
 # Import auth components
 from auth.oauth import oauth_handler
 from auth.jwt_handler import jwt_handler
-from auth.middleware import get_current_user
+from auth.middleware import get_current_user, require_admin
+from auth.keycloak_client import KeycloakClient, resolve_role_for_email
+from auth.rbac import filter_response_for_role, filter_messages_for_role
+from role_sync import sync_users
 
 # OAuth states storage (use Redis in production)
 oauth_states = {}
+
+# Keycloak client for RBAC role resolution
+keycloak_client = KeycloakClient()
 
 # Lifespan context manager for startup/shutdown events
 @asynccontextmanager
@@ -182,7 +188,10 @@ async def send_to_bknd(request: QueryRequest, current_user: User = Depends(get_c
         response_data['session_id'] = session_id_str
         response_data['turn_number'] = turn_number
         
-        return response_data
+        # Filter response based on user's role (Req 8.1–8.4)
+        # The full unfiltered response is already stored in DB above.
+        # Filtering is read-time only.
+        return filter_response_for_role(response_data, current_user.role)
         
     except Exception as e:
         # Mark turn as failed
@@ -252,7 +261,8 @@ async def get_session_turns(session_id: str, current_user: User = Depends(get_cu
         for turn in turns:
             messages.extend(turn.to_message_format())
         
-        return messages
+        # Filter stored responses by the requesting user's role (Req 8.5)
+        return filter_messages_for_role(messages, current_user.role)
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Failed to fetch turns: {str(e)}")
 
@@ -265,7 +275,17 @@ async def get_session_turns_raw(session_id: str, current_user: User = Depends(ge
             ConversationTurn.session_id == uuid.UUID(session_id)
         ).order_by(ConversationTurn.turn_number).all()
         
-        return [turn.to_dict() for turn in turns]
+        # Filter each turn's assistant_response by role (Req 8.5)
+        result = []
+        for turn in turns:
+            turn_dict = turn.to_dict()
+            if isinstance(turn_dict.get("assistant_response"), dict):
+                turn_dict["assistant_response"] = filter_response_for_role(
+                    turn_dict["assistant_response"], current_user.role
+                )
+            result.append(turn_dict)
+        
+        return result
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Failed to fetch turns: {str(e)}")
 
@@ -343,7 +363,8 @@ async def get_session_messages(session_id: str, current_user: User = Depends(get
         for turn in turns:
             messages.extend(turn.to_message_format())
         
-        return messages
+        # Filter stored responses by the requesting user's role (Req 8.5)
+        return filter_messages_for_role(messages, current_user.role)
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Failed to fetch turns: {str(e)}")
 
@@ -400,8 +421,11 @@ async def auth_google_callback(code: str, state: str = None, db: Session = Depen
         db.commit()
         db.refresh(user)
         
-        # Generate JWT token
-        token = jwt_handler.create_token(user.id, user.email)
+        # Resolve user's role from Keycloak (Req 5.1–5.5)
+        role = resolve_role_for_email(user.email, keycloak_client)
+        
+        # Generate JWT token with role claim (Req 6.1)
+        token = jwt_handler.create_token(user.id, user.email, role.value)
         
         # Redirect to frontend with cookie
         response = RedirectResponse(url=os.getenv("FRONTEND_URL", "http://localhost:5173"))
@@ -431,8 +455,8 @@ async def auth_logout(current_user: User = Depends(get_current_user)):
 
 @app.get("/auth/me")
 async def auth_me(current_user: User = Depends(get_current_user)):
-    """Get current user info"""
-    return current_user.to_dict()
+    """Get current user info including role"""
+    return {**current_user.to_dict(), "role": current_user.role.value}
 
 
 @app.get("/auth/verify")
@@ -441,13 +465,20 @@ async def auth_verify(current_user: User = Depends(get_current_user)):
     return {"valid": True, "user_id": current_user.id}
 
 
-@app.get("/health")
-async def health_check():
-    return {
-        "status": "healthy",
-        "service": "Sentra Insurance API V3",
-        "features": ["UUID sessions", "Conversation turns", "Auto-sequencing", "Google OAuth"]
-    }
+# ============================================
+# ADMIN ENDPOINTS
+# ============================================
+
+@app.get("/admin/users")
+async def list_users(admin: User = Depends(require_admin), db: Session = Depends(get_db)):
+    """List all authorized users. Admin-only (Req 9.1, 9.2)."""
+    return [u.to_dict() for u in db.query(User).all()]
+
+
+@app.post("/admin/keycloak/sync")
+async def trigger_sync(admin: User = Depends(require_admin), db: Session = Depends(get_db)):
+    """Trigger Keycloak user synchronization. Admin-only (Req 9.1, 9.2)."""
+    return sync_users(keycloak_client, db)
 
 
 # ============================================

@@ -1,0 +1,47 @@
+{
+  "realm": "sentra",
+  "enabled": true,
+  "displayName": "Sentra",
+  "roles": {
+    "realm": [
+      {
+        "name": "admin",
+        "description": "Full access to all capabilities and data fields",
+        "composite": false,
+        "clientRole": false,
+        "attributes": {}
+      },
+      {
+        "name": "viewer_with_query",
+        "description": "Non-admin role permitted to view the executed SQL query",
+        "composite": false,
+        "clientRole": false,
+        "attributes": {}
+      },
+      {
+        "name": "viewer_without_query",
+        "description": "Most restrictive role - cannot view executed SQL queries",
+        "composite": false,
+        "clientRole": false,
+        "attributes": {}
+      }
+    ]
+  },
+  "clients": [
+    {
+      "clientId": "sentra-backend",
+      "name": "Sentra Backend Service",
+      "description": "Backend service account for role management",
+      "enabled": true,
+      "clientAuthenticatorType": "client-secret",
+      "secret": "sentra-dev-secret",
+      "serviceAccountsEnabled": true,
+      "standardFlowEnabled": false,
+      "implicitFlowEnabled": false,
+      "directAccessGrantsEnabled": false,
+      "publicClient": false,
+      "protocol": "openid-connect",
+      "fullScopeAllowed": true
+    }
+  ]
+}

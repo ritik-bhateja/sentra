@@ -1,6 +1,7 @@
 import { useState, useRef, useEffect } from 'react'
 import ChartView from './ChartView'
 import { formatMarkdownText, hasMarkdownFormatting } from '../utils/markdownParser.jsx'
+import { useAuth } from '../contexts/AuthContext'
 import './ChatMessage.css'
 
 // Import parseInlineFormatting for rendering bold text and formatting
@@ -514,6 +515,10 @@ function ChatMessage({ message }) {
 
   const { content } = message
   
+  // Role-based query visibility
+  const { role } = useAuth()
+  const canViewQuery = role === 'admin' || role === 'viewer_with_query'
+
   // Determine response type based on the API response structure
   const isChartData = Array.isArray(content.data) && content.type !== 'text'
 
@@ -553,7 +558,7 @@ function ChatMessage({ message }) {
                 </svg>
                 Table
               </button>
-              {content.query_executed && (
+              {canViewQuery && content.query_executed && (
                 <button
                   className={activeTab === 'query' ? 'active' : ''}
                   onClick={() => setActiveTab('query')}
@@ -636,7 +641,7 @@ function ChatMessage({ message }) {
               </div>
             )}
 
-            {activeTab === 'query' && content.query_executed && (
+            {activeTab === 'query' && canViewQuery && content.query_executed && (
               <ExpandableSection 
                 title="SQL Query Details" 
                 icon="🔍" 
@@ -713,7 +718,7 @@ function ChatMessage({ message }) {
                 </svg>
                 Response
               </button>
-              {content.query_executed && (
+              {canViewQuery && content.query_executed && (
                 <button
                   className={activeTab === 'query' ? 'active' : ''}
                   onClick={() => setActiveTab('query')}
@@ -787,7 +792,7 @@ function ChatMessage({ message }) {
               </div>
             )}
 
-            {activeTab === 'query' && content.query_executed && (
+            {activeTab === 'query' && canViewQuery && content.query_executed && (
               <div className="query-and-nudge-section">
                 <ExpandableSection 
                   title="SQL Query Details" 
