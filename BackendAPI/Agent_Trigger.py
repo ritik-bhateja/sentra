@@ -25,6 +25,17 @@ from auth.keycloak_client import KeycloakClient, resolve_role_for_email
 from auth.rbac import filter_response_for_role, filter_messages_for_role
 from role_sync import sync_users
 
+# Import admin components
+from admin_service import AdminService
+from admin_schemas import (
+    AddUserRequest,
+    ChangeRoleRequest,
+    ListUsersResponse,
+    UserWithRole,
+    RoleInfo,
+    DeleteUserResponse,
+)
+
 # OAuth states storage (use Redis in production)
 oauth_states = {}
 
@@ -469,10 +480,54 @@ async def auth_verify(current_user: User = Depends(get_current_user)):
 # ADMIN ENDPOINTS
 # ============================================
 
-@app.get("/admin/users")
+@app.get("/admin/users", response_model=ListUsersResponse)
 async def list_users(admin: User = Depends(require_admin), db: Session = Depends(get_db)):
-    """List all authorized users. Admin-only (Req 9.1, 9.2)."""
-    return [u.to_dict() for u in db.query(User).all()]
+    """List all authorized users with their Keycloak roles. Admin-only."""
+    try:
+        return AdminService.list_users_with_roles(db, keycloak_client)
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Internal server error: {str(e)}")
+
+
+@app.post("/admin/users", response_model=UserWithRole, status_code=201)
+async def add_user(request: AddUserRequest, admin: User = Depends(require_admin), db: Session = Depends(get_db)):
+    """Add a new user with a specific role. Admin-only."""
+    try:
+        return AdminService.add_user(db, keycloak_client, request.email, request.role)
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Internal server error: {str(e)}")
+
+
+@app.put("/admin/users/{email}/role", response_model=UserWithRole)
+async def change_user_role(email: str, request: ChangeRoleRequest, admin: User = Depends(require_admin), db: Session = Depends(get_db)):
+    """Change a user's role. Admin-only."""
+    try:
+        return AdminService.change_user_role(db, keycloak_client, email, request.role)
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Internal server error: {str(e)}")
+
+
+@app.delete("/admin/users/{email}", response_model=DeleteUserResponse)
+async def delete_user(email: str, admin: User = Depends(require_admin), db: Session = Depends(get_db)):
+    """Delete a user from RDS and Keycloak. Admin-only."""
+    try:
+        return AdminService.delete_user(db, keycloak_client, email)
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Internal server error: {str(e)}")
+
+
+@app.get("/admin/roles", response_model=List[RoleInfo])
+async def list_assignable_roles(admin: User = Depends(require_admin)):
+    """List assignable roles (excludes admin). Admin-only."""
+    return AdminService.get_assignable_roles()
 
 
 @app.post("/admin/keycloak/sync")

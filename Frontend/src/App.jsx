@@ -3,6 +3,8 @@ import { AuthProvider } from './contexts/AuthContext';
 import Login from './components/Login';
 import ChatInterface from './components/ChatInterface';
 import ProtectedRoute from './components/ProtectedRoute';
+import AdminRoute from './components/AdminRoute';
+import AdminConsole from './components/AdminConsole';
 import './App.css';
 
 function App() {
@@ -16,6 +18,16 @@ function App() {
             element={
               <ProtectedRoute>
                 <ChatInterface />
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="/admin"
+            element={
+              <ProtectedRoute>
+                <AdminRoute>
+                  <AdminConsole />
+                </AdminRoute>
               </ProtectedRoute>
             }
           />

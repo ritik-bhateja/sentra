@@ -169,6 +169,66 @@ class KeycloakClient:
                 f"{resp.status_code} {resp.text}"
             )
 
+    def delete_user(self, email: str) -> None:
+        """Delete a user from the Keycloak realm by email.
+
+        Looks up the user by email and then deletes them from Keycloak.
+
+        Raises:
+            KeycloakUnavailable: if the user is not found in Keycloak or if the
+            delete request fails.
+
+        Requirements: 3.2, 5.2
+        """
+        user_id = self._find_user_id_by_email(email)
+        if user_id is None:
+            raise KeycloakUnavailable(
+                f"User not found in Keycloak: {email}"
+            )
+
+        url = (
+            f"{self.base_url}/admin/realms/{self.realm}/users/{user_id}"
+        )
+        resp = self._authed_request("DELETE", url)
+        if resp.status_code not in (200, 204):
+            raise KeycloakUnavailable(
+                f"Failed to delete user {email} from Keycloak: "
+                f"{resp.status_code} {resp.text}"
+            )
+
+    def remove_realm_roles(self, user_id: str, role_names: list[str]) -> None:
+        """Remove specified realm roles from a user.
+
+        For each role name, fetches the role representation and then sends a
+        DELETE request to remove the roles from the user's realm-role-mappings.
+
+        Raises:
+            KeycloakUnavailable: if any role representation cannot be fetched or
+            if the delete request fails.
+
+        Requirements: 3.2, 5.2
+        """
+        if not role_names:
+            return
+
+        # Gather role representations for all specified roles.
+        role_reps = []
+        for role_name in role_names:
+            role_rep = self._get_role_representation(role_name)
+            role_reps.append(role_rep)
+
+        # Send a single DELETE request with all role representations.
+        url = (
+            f"{self.base_url}/admin/realms/{self.realm}"
+            f"/users/{user_id}/role-mappings/realm"
+        )
+        resp = self._authed_request("DELETE", url, json=role_reps)
+        if resp.status_code not in (200, 204):
+            raise KeycloakUnavailable(
+                f"Failed to remove roles {role_names} from user {user_id}: "
+                f"{resp.status_code} {resp.text}"
+            )
+
     # ------------------------------------------------------------------
     # Internal helpers
     # ------------------------------------------------------------------
