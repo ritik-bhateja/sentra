@@ -38,7 +38,8 @@ class GoogleOAuthHandler:
         id_info = id_token.verify_oauth2_token(
             credentials.id_token,
             requests.Request(),
-            self.client_id
+            self.client_id,
+            clock_skew_in_seconds=5
         )
         
         return {
